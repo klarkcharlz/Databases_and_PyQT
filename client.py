@@ -1,9 +1,11 @@
 from socket import socket, AF_INET, SOCK_STREAM
 import argparse
 from time import time, sleep
-from json import dumps, loads
+from json import dumps
 import threading
 import sys
+from pprint import pprint
+import dis
 
 from log_conf.client_log_config import client_log
 from decos import Log
@@ -24,14 +26,24 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-class CustomClient:
-    """Кастомный клиент"""
+class ClientVerifier(type):
 
+    def __init__(cls, class_name, bases, class_dict):
+        for key in class_dict:
+            if key in ('accept', 'listen'):
+                raise ValueError(f"Вызов {key} не в положенном месте")
+        type.__init__(cls, class_name, bases, class_dict)
+
+
+class CustomClient(metaclass=ClientVerifier):
+    """Кастомный клиент"""
     def __init__(self, family: int, type_: int, timeout_=None) -> None:
         self.client = socket(family, type_)
         if timeout_:
             self.client.settimeout(timeout_)
         self.con = False
+        self.addr = args.addr
+        self.port = args.port
         self.name = self.get_name()
 
     @staticmethod
@@ -144,7 +156,7 @@ class CustomClient:
             'account_name': self.name
         }
 
-    def user_interactive(self,):
+    def user_interactive(self, ):
         self.print_help()
         while True:
             command = input('Введите команду: ')
@@ -164,7 +176,9 @@ class CustomClient:
 
     @Log(client_log)
     def run(self):
-        self.connect(args.addr, args.port)
+        print("АХАХАХАХ")
+        print(self.port)
+        self.connect(self.addr, self.connect)
         while True:
             try:
                 presence_msg = self.create_presence()

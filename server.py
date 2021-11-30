@@ -23,6 +23,17 @@ parser.add_argument(
 args = parser.parse_args()
 
 
+class ValidPort:
+
+    def __get__(self, instance, instance_type):
+        return self._value
+
+    def __set__(self, instance, value):
+        if not (isinstance(value, int) and value > 0):
+            raise ValueError(f"Invalid Port {value}")
+        self._value = value
+
+
 class IncorrectDataRecivedError(Exception):
     """Исключение  - некорректные данные получены от сокета"""
 
@@ -37,13 +48,24 @@ class NonDictInputError(Exception):
         return 'Аргумент функции должен быть словарём.'
 
 
-class CustomServer:
+class ServerVerifier(type):
+
+    def __init__(cls, class_name, bases, class_dict):
+        for key in class_dict:
+            if key == "connect":
+                raise ValueError(f"Вызов {key} не в положенном месте")
+        type.__init__(cls, class_name, bases, class_dict)
+
+
+class CustomServer(metaclass=ServerVerifier):
     """Кастомный сервер"""
+    port = ValidPort()
 
     def __init__(self, family: int, type_: int, interval: int, addr: str, port: int, max_clients: int) -> None:
+        self.port = port
         self.server = socket(family, type_)
         self.server.settimeout(interval)
-        self.server.bind((addr, port))
+        self.server.bind((addr, self.port))
         self.server.listen(max_clients)
 
     @staticmethod
@@ -141,7 +163,7 @@ class CustomServer:
                     server_log.exception(err)
                 else:
                     # принимаем сообщения и если ошибка, исключаем клиента.
-                    print(recv_data_lst)
+                    # print(recv_data_lst)
                     if recv_data_lst:
                         for client_with_message in recv_data_lst:
                             try:
