@@ -33,3 +33,12 @@ class History(Base):
 
     def __repr__(self):
         return f"{self.ip}: {self.entry_time}"
+
+
+class ActiveUsers(Base):
+    __tablename__ = 'active_users'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, ForeignKey(User.id), unique=True)
+
+    def __init__(self, user_id):
+        self.user_id = user_id

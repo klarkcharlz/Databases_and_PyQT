@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 
-from models import User, History
+from models import User, History, ActiveUsers
 
 
 engine = create_engine("sqlite:///users.db")
@@ -11,7 +11,7 @@ session = Session()
 
 
 if __name__ == "__main__":
-    models = [User, History]
+    models = [User, History, ActiveUsers]
     for model in models:
         try:
             model.__table__.create(engine)
