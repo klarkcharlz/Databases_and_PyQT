@@ -3,6 +3,7 @@ from socket import timeout as TimeoutError
 from select import select
 import argparse
 from json import dumps, loads
+import dis
 
 from log_conf.server_log_config import server_log
 from decos import Log
@@ -24,14 +25,20 @@ args = parser.parse_args()
 
 
 class ValidPort:
-
+    """
+    Это должно быть целое число (>=0). Значение порта по умолчанию равняется 7777.
+    """
     def __get__(self, instance, instance_type):
-        return self._value
+        return instance.__dict__[self.value]
 
-    def __set__(self, instance, value):
-        if not (isinstance(value, int) and value > 0):
-            raise ValueError(f"Invalid Port {value}")
-        self._value = value
+    def __set__(self, instance, value=7777):
+        if not isinstance(value, int):
+            if value <= 0:
+                raise ValueError(f"Invalid Port {value}")
+        instance.__dict__[self.value] = value
+
+    def __set_name__(self, owner, name):
+        self.value = name
 
 
 class IncorrectDataRecivedError(Exception):
@@ -49,32 +56,49 @@ class NonDictInputError(Exception):
 
 
 class ServerVerifier(type):
+    """
+    отсутствие вызовов connect для сокетов;
+    использование сокетов для работы по TCP.
+    """
 
     def __init__(cls, class_name, bases, class_dict):
-        for key in class_dict:
-            if key == "connect":
-                raise ValueError(f"Вызов {key} не в положенном месте")
-        type.__init__(cls, class_name, bases, class_dict)
+        methods = []
+        methods_2 = []
+        attrs = []
+        for func in class_dict:
+            try:
+                ret = dis.get_instructions(class_dict[func])
+            except TypeError:
+                pass
+            else:
+                for i in ret:
+                    if i.opname == 'LOAD_GLOBAL':
+                        if i.argval not in methods:
+                            methods.append(i.argval)
+                    elif i.opname == 'LOAD_METHOD':
+                        if i.argval not in methods_2:
+                            methods_2.append(i.argval)
+                    elif i.opname == 'LOAD_ATTR':
+                        if i.argval not in attrs:
+                            attrs.append(i.argval)
+        if 'connect' in methods:
+            raise TypeError('Использование метода connect недопустимо в серверном классе')
+        # ToDo при моей инициализации не отображает эти переменные, переделать инициализацию ?
+        # if not ('SOCK_STREAM' in attrs and 'AF_INET' in attrs):
+        #     raise TypeError('Некорректная инициализация сокета.')
+
+        super().__init__(class_name, bases, class_dict)
 
 
 class CustomServer(metaclass=ServerVerifier):
-    """Кастомный сервер"""
     port = ValidPort()
 
-    def __init__(self, family: int, type_: int, interval: int, addr: str, port: int, max_clients: int) -> None:
+    def __init__(self, family: int, type_: int, interval: int or float, addr: str, port: int, max_clients: int) -> None:
         self.port = port
         self.server = socket(family, type_)
         self.server.settimeout(interval)
         self.server.bind((addr, self.port))
         self.server.listen(max_clients)
-
-    @staticmethod
-    def send_message(sock, message):
-        if not isinstance(message, dict):
-            raise NonDictInputError
-        js_message = dumps(message)
-        encoded_message = js_message.encode('utf-8')
-        sock.send(encoded_message)
 
     def process_client_message(self, message, messages_list, client, clients, names):
         server_log.info(f'Разбор сообщения от клиента : {message}')
@@ -84,8 +108,7 @@ class CustomServer(metaclass=ServerVerifier):
                 names[message['user']['account_name']] = client
                 self.send_message(client, {'response': 200})
             else:
-                response = {'response': 400, 'error': None}
-                response['error'] = 'Имя пользователя уже занято.'
+                response = {'response': 400, 'error': 'Имя пользователя уже занято.'}
                 self.send_message(client, response)
                 clients.remove(client)
                 client.close()
@@ -101,8 +124,7 @@ class CustomServer(metaclass=ServerVerifier):
             del names[message['account_name']]
             return
         else:
-            response = {'response': 400, 'error': None}
-            response['error'] = 'Запрос некорректен.'
+            response = {'response': 400, 'error': 'Запрос некорректен.'}
             self.send_message(client, response)
             return
 
@@ -142,8 +164,6 @@ class CustomServer(metaclass=ServerVerifier):
         """Запуск сервера"""
         server_log.warning("Запуск сервера")
         clients = []
-        recv_data_lst = []
-        send_data_lst = []
         messages = []
         names = dict()
         while True:
@@ -156,7 +176,12 @@ class CustomServer(metaclass=ServerVerifier):
             else:
                 clients.append(client)
             finally:
+                recv_data_lst = []
+                send_data_lst = []
                 try:
+                    # print(clients)
+                    # print(recv_data_lst)
+                    # print(send_data_lst)
                     if clients:
                         recv_data_lst, send_data_lst, err_lst = select(clients, clients, [], 0)
                 except Exception as err:
@@ -164,21 +189,21 @@ class CustomServer(metaclass=ServerVerifier):
                 else:
                     # принимаем сообщения и если ошибка, исключаем клиента.
                     # print(recv_data_lst)
-                    if recv_data_lst:
+                    if recv_data_lst and clients:
                         for client_with_message in recv_data_lst:
                             try:
                                 self.process_client_message(self.get_message(client_with_message),
                                                             messages, client_with_message, clients, names)
-                            except Exception:
+                            except:
                                 server_log.info(f'Клиент {client_with_message.getpeername()} '
                                                 f'отключился от сервера.')
-                                self.clients.remove(client_with_message)
+                                clients.remove(client_with_message)
 
                     # Если есть сообщения, обрабатываем каждое.
                     for i in messages:
                         try:
                             self.process_message(i, names, send_data_lst)
-                        except Exception:
+                        except:
                             server_log.info(f'Связь с клиентом с именем {i["to"]} была потеряна')
                             clients.remove(names[i["to"]])
                             del names[i["to"]]

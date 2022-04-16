@@ -4,7 +4,6 @@ from time import time, sleep
 from json import dumps
 import threading
 import sys
-from pprint import pprint
 import dis
 
 from log_conf.client_log_config import client_log
@@ -27,16 +26,35 @@ args = parser.parse_args()
 
 
 class ClientVerifier(type):
+    """
+    отсутствие вызовов accept и listen для сокетов;
+    использование сокетов для работы по TCP;
+    """
 
     def __init__(cls, class_name, bases, class_dict):
-        for key in class_dict:
-            if key in ('accept', 'listen'):
-                raise ValueError(f"Вызов {key} не в положенном месте")
-        type.__init__(cls, class_name, bases, class_dict)
+        methods = []
+        for func in class_dict:
+            try:
+                ret = dis.get_instructions(class_dict[func])
+            except TypeError:
+                pass
+            else:
+                for i in ret:
+                    if i.opname == 'LOAD_METHOD':
+                        if i.argval not in methods:
+                            methods.append(i.argval)
+        for command in ('accept', 'listen'):
+            if command in methods:
+                raise TypeError('В классе обнаружено использование запрещённого метода')
+        if '__receive_msg' in methods or 'send_message' in methods:
+            pass
+        else:
+            raise TypeError('Отсутствуют вызовы функций, работающих с сокетами.')
+        super().__init__(class_name, bases, class_dict)
 
 
 class CustomClient(metaclass=ClientVerifier):
-    """Кастомный клиент"""
+
     def __init__(self, family: int, type_: int, timeout_=None) -> None:
         self.client = socket(family, type_)
         if timeout_:
@@ -45,6 +63,7 @@ class CustomClient(metaclass=ClientVerifier):
         self.addr = args.addr
         self.port = args.port
         self.name = self.get_name()
+        self.run_flag = None
 
     @staticmethod
     @Log(client_log)
@@ -91,7 +110,7 @@ class CustomClient(metaclass=ClientVerifier):
             return str(data)
 
     @Log(client_log)
-    def send_message(self, mess: dict) -> str:
+    def send_message(self, mess: dict) -> str or None:
         """Отправка сообщения серверу"""
         if self.con:
             self.client.send(dumps(mess).encode('utf-8'))
@@ -119,7 +138,8 @@ class CustomClient(metaclass=ClientVerifier):
         return out
 
     def message_from_server(self):
-        while True:
+        while self.run_flag:
+            sleep(0.1)
             mes = self.__receive_msg()
             print(self.__validate_response(mes))
 
@@ -157,7 +177,6 @@ class CustomClient(metaclass=ClientVerifier):
         }
 
     def user_interactive(self, ):
-        self.print_help()
         while True:
             command = input('Введите команду: ')
             if command == 'message':
@@ -168,6 +187,7 @@ class CustomClient(metaclass=ClientVerifier):
                 self.send_message(self.create_exit_message())
                 print('Завершение соединения.')
                 client_log.info('Завершение работы по команде пользователя.')
+                self.run_flag = False
                 # Задержка неоходима, чтобы успело уйти сообщение о выходе
                 sleep(0.5)
                 break
@@ -176,10 +196,9 @@ class CustomClient(metaclass=ClientVerifier):
 
     @Log(client_log)
     def run(self):
-        print("АХАХАХАХ")
-        print(self.port)
-        self.connect(self.addr, self.connect)
-        while True:
+        self.connect(self.addr, self.port)
+        self.run_flag = True
+        while self.run_flag:
             try:
                 presence_msg = self.create_presence()
                 self.send_message(presence_msg)
@@ -194,9 +213,11 @@ class CustomClient(metaclass=ClientVerifier):
                 user_interface.start()
                 client_log.info('Запущены процессы')
                 while True:
-                    sleep(1)
+                    sleep(0.01)
                     if receiver.is_alive() and user_interface.is_alive():
                         continue
+                    print("Выход из клиентской программы.")
+                    self.run_flag = False
                     break
 
 
