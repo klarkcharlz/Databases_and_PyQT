@@ -1,3 +1,110 @@
-"""
+from datetime import datetime
 
-"""
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
+
+from .models import (MODELS_LIST,
+                     ActiveUsers,
+                     User,
+                     History,
+                     LoginHistory,
+                     UsersContacts)
+
+
+def create_db(engine):
+    for model in MODELS_LIST:
+        try:
+            model.__table__.create(engine)
+        except OperationalError:
+            print(f"Таблица {model} уже есть в БД.")
+        else:
+            print(f"Таблица {model} создана в БД.")
+
+
+def connect(path):
+    database_engine = create_engine(f'sqlite:///{path}', echo=False, pool_recycle=7200,
+                                    connect_args={'check_same_thread': False})
+    create_db(database_engine)
+    Session = sessionmaker(bind=database_engine)
+    session = Session()
+
+    session.query(ActiveUsers).delete()
+    session.commit()
+
+    return session
+
+
+def user_logout(session, name):
+    user = session.query(User).filter_by(name=name).first()
+    session.query(ActiveUsers).filter_by(user_id=user.id).delete()
+    session.commit()
+
+
+def user_login(session, name, ip, port):
+    rez = session.query(User).filter_by(name=name)
+    if rez.count():
+        user = rez.first()
+        user.last_login = datetime.now()
+    else:
+        user = User(name)
+        session.add(user)
+        session.commit()
+        user_in_history = History(user.id)
+        session.add(user_in_history)
+
+    new_active_user = ActiveUsers(user.id, ip, port, datetime.now())
+    session.add(new_active_user)
+
+    login_history = LoginHistory(user.id, datetime.now(), ip, port)
+    session.add(login_history)
+
+    session.commit()
+
+
+def process_message(session, sender, recipient):
+    sender = session.query(User).filter_by(name=sender).first().id
+    recipient = session.query(User).filter_by(name=recipient).first().id
+    sender_row = session.query(History).filter_by(user=sender).first()
+    sender_row.sent += 1
+    recipient_row = session.query(History).filter_by(user=recipient).first()
+    recipient_row.accepted += 1
+    session.commit()
+
+
+def get_contacts(session, username):
+    user = session.query(User).filter_by(name=username).one()
+    query = session.query(UsersContacts, User). \
+        filter_by(user_id=user.id). \
+        join(User, UsersContacts.contact == User.id)
+    return [contact[1] for contact in query.all()]
+
+
+def add_contact(session, user, contact):
+    user = session.query(User).filter_by(name=user).first()
+    contact = session.query(User).filter_by(name=contact).first()
+    if not contact or session.query(UsersContacts).filter_by(user_id=user.id, contact=contact.id).count():
+        return
+    contact_row = UsersContacts(user.id, contact.id)
+    session.add(contact_row)
+    session.commit()
+
+
+def remove_contact(session, user, contact):
+    user = session.query(User).filter_by(name=user).first()
+    contact = session.query(User).filter_by(name=contact).first()
+    if not contact:
+        return
+    print(session.query(UsersContacts).filter(
+        UsersContacts.user == user.id,
+        UsersContacts.contact == contact.id
+    ).delete())
+    session.commit()
+
+
+def users_list(session):
+    query = session.query(
+        User.name,
+        User.last_login
+    )
+    return query.all()

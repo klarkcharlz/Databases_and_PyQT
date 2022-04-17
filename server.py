@@ -1,12 +1,30 @@
-from socket import socket, AF_INET, SOCK_STREAM
+from socket import socket, AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
 from socket import timeout as TimeoutError
 from select import select
 import argparse
 from json import dumps, loads
 import dis
+import threading
+
+from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtCore import QTimer
+from server_gui import MainWindow, gui_create_model, HistoryWindow, create_stat_model, ConfigWindow
 
 from log_conf.server_log_config import server_log
 from decos import Log
+from database.function import connect as connect_db
+from database.function import (user_logout,
+                               user_login,
+                               process_message,
+                               get_contacts,
+                               add_contact,
+                               remove_contact,
+                               users_list)
+
+TIMEOUT = 0.5
+
+new_connection = False
+conflag_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description='JSON instant messaging client.')
 parser.add_argument(
@@ -90,43 +108,90 @@ class ServerVerifier(type):
         super().__init__(class_name, bases, class_dict)
 
 
-class CustomServer(metaclass=ServerVerifier):
+class CustomServer(threading.Thread, metaclass=ServerVerifier):
     port = ValidPort()
 
     def __init__(self, family: int, type_: int, interval: int or float, addr: str, port: int, max_clients: int) -> None:
+        super().__init__()
         self.port = port
-        self.server = socket(family, type_)
-        self.server.settimeout(interval)
-        self.server.bind((addr, self.port))
-        self.server.listen(max_clients)
+        self.family = family
+        self.type_ = type_
+        self.interval = interval
+        self.addr = addr
+        self.max_clients = max_clients
 
-    def process_client_message(self, message, messages_list, client, clients, names):
+        self.server = None
+        self.session = connect_db("./db/server.db3")
+
+        self.clients = []
+        self.messages = []
+        self.names = dict()
+
+    def init_sock(self):
+        self.server = socket(self.family, self.type_)
+        self.server.settimeout(self.interval)
+        self.server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        self.server.bind((self.addr, self.port))
+        self.server.listen(self.max_clients)
+
+    def process_client_message(self, message, client):
+        global new_connection
         server_log.info(f'Разбор сообщения от клиента : {message}')
+        # presence
         if 'action' in message and message['action'] == 'presence' and \
                 'time' in message and 'user' in message:
-            if message['user']['account_name'] not in names.keys():
-                names[message['user']['account_name']] = client
+            if message['user']['account_name'] not in self.names.keys():
+                self.names[message['user']['account_name']] = client
+                client_ip, client_port = client.getpeername()
+                user_login(self.session, message['user']['account_name'], client_ip, client_port)
                 self.send_message(client, {'response': 200})
+                with conflag_lock:
+                    new_connection = True
             else:
                 response = {'response': 400, 'error': 'Имя пользователя уже занято.'}
                 self.send_message(client, response)
-                clients.remove(client)
+                self.clients.remove(client)
                 client.close()
-            return
+        # message
         elif 'action' in message and message['action'] == 'message' and \
                 'to' in message and 'time' in message \
                 and 'from' in message and 'mess_text' in message:
-            messages_list.append(message)
-            return
+            self.messages.append(message)
+            process_message(self.session, message['from'], message['to'])
+        # exit
         elif 'action' in message and message['action'] == 'exit' and 'account_name' in message:
-            clients.remove(names[message['account_name']])
-            names[message['account_name']].close()
-            del names[message['account_name']]
-            return
+            user_logout(self.session, message['account_name'])
+            self.clients.remove(self.names[message['account_name']])
+            self.names[message['account_name']].close()
+            del self.names[message['account_name']]
+            with conflag_lock:
+                new_connection = True
+        # get_contacts
+        elif 'action' in message and message['action'] == 'get_contacts' and 'user' in message and \
+                self.names[message['user']] == client:
+            response = {'response': 202,
+                        'data_list': get_contacts(self.session, message['user'])}
+            self.send_message(client, response)
+        # add
+        elif 'action' in message and message['action'] == 'add' and 'account_name' in message and 'user' in message \
+                and self.names[message['user']] == client:
+            add_contact(self.session, message['user'], message['account_name'])
+            self.send_message(client, {'response': 200})
+        # remove
+        elif 'action' in message and message['action'] == 'remove' and 'account_name' in message and 'user' in message \
+                and self.names[message['user']] == client:
+            remove_contact(self.session, message['user'], message['account_name'])
+            self.send_message(client, {'response': 200})
+        # Если это запрос известных пользователей
+        elif 'action' in message and message['action'] == 'get_users' and 'account_name' in message \
+                and self.names[message['account_name']] == client:
+            response = {'response': 202,
+                        'data_list': [user[0] for user in users_list(self.session)]
+                        }
+            self.send_message(client, response)
         else:
             response = {'response': 400, 'error': 'Запрос некорректен.'}
             self.send_message(client, response)
-            return
 
     @staticmethod
     def get_message(client):
@@ -149,11 +214,11 @@ class CustomServer(metaclass=ServerVerifier):
         encoded_message = js_message.encode('utf-8')
         sock.send(encoded_message)
 
-    def process_message(self, message, names, listen_socks):
-        if message['to'] in names and names[message['to']] in listen_socks:
-            self.send_message(names[message['to']], message)
+    def process_message(self, message, listen_socks):
+        if message['to'] in self.names and self.names[message['to']] in listen_socks:
+            self.send_message(self.names[message['to']], message)
             server_log.info(f'Отправлено сообщение пользователю {message["to"]} от пользователя {message["from"]}.')
-        elif message['to'] in names and names[message['to']] not in listen_socks:
+        elif message['to'] in self.names and self.names[message['to']] not in listen_socks:
             raise ConnectionError
         else:
             server_log.error(
@@ -162,10 +227,10 @@ class CustomServer(metaclass=ServerVerifier):
     @Log(server_log)
     def run(self) -> None:
         """Запуск сервера"""
+        self.init_sock()
+
         server_log.warning("Запуск сервера")
-        clients = []
-        messages = []
-        names = dict()
+
         while True:
             try:
                 client, address = self.server.accept()  # ловим подключение
@@ -174,7 +239,8 @@ class CustomServer(metaclass=ServerVerifier):
                 pass
                 # server_log.info("Клиентов не обнаружено")
             else:
-                clients.append(client)
+                server_log.info(f'Установлено соедение с ПК {address}')
+                self.clients.append(client)
             finally:
                 recv_data_lst = []
                 send_data_lst = []
@@ -182,39 +248,52 @@ class CustomServer(metaclass=ServerVerifier):
                     # print(clients)
                     # print(recv_data_lst)
                     # print(send_data_lst)
-                    if clients:
-                        recv_data_lst, send_data_lst, err_lst = select(clients, clients, [], 0)
+                    if self.clients:
+                        recv_data_lst, send_data_lst, err_lst = select(self.clients, self.clients, [], 0)
                 except Exception as err:
                     server_log.exception(err)
                 else:
                     # принимаем сообщения и если ошибка, исключаем клиента.
                     # print(recv_data_lst)
-                    if recv_data_lst and clients:
+                    if recv_data_lst and self.clients:
                         for client_with_message in recv_data_lst:
                             try:
-                                self.process_client_message(self.get_message(client_with_message),
-                                                            messages, client_with_message, clients, names)
+                                self.process_client_message(self.get_message(client_with_message), client_with_message)
                             except:
                                 server_log.info(f'Клиент {client_with_message.getpeername()} '
                                                 f'отключился от сервера.')
-                                clients.remove(client_with_message)
+                                for name in self.names:
+                                    if self.names[name] == client_with_message:
+                                        user_logout(self.session, name)
+                                        del self.names[name]
+                                        break
+                                self.clients.remove(client_with_message)
 
                     # Если есть сообщения, обрабатываем каждое.
-                    for i in messages:
+                    for message in self.messages:
                         try:
-                            self.process_message(i, names, send_data_lst)
+                            self.process_message(message, send_data_lst)
                         except:
-                            server_log.info(f'Связь с клиентом с именем {i["to"]} была потеряна')
-                            clients.remove(names[i["to"]])
-                            del names[i["to"]]
-                    messages.clear()
+                            server_log.info(f'Связь с клиентом с именем {message["to"]} была потеряна')
+                            self.clients.remove(self.names[message["to"]])
+                            user_logout(message["to"])
+                            del self.names[message["to"]]
+                    self.messages.clear()
 
 
-if __name__ == "__main__":
+def main():
     my_serv = CustomServer(family=AF_INET,
                            type_=SOCK_STREAM,
-                           interval=0.5,
+                           interval=TIMEOUT,
                            addr=args.addr,
                            port=args.port,
                            max_clients=5)
-    my_serv.run()
+    my_serv.daemon = True
+    my_serv.start()
+
+
+if __name__ == "__main__":
+    main()
+    from time import sleep
+    while True:
+        sleep(1)
