@@ -4,16 +4,27 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from .models import (MODELS_LIST,
+from .models import (server_models,
+                     client_models,
                      ActiveUsers,
                      User,
                      History,
                      LoginHistory,
-                     UsersContacts)
+                     UsersContacts,
+                     Contacts,
+                     KnownUsers)
 
 
-def create_db(engine):
-    for model in MODELS_LIST:
+class ServerError(Exception):
+    def __init__(self, text):
+        self.text = text
+
+    def __str__(self):
+        return self.text
+
+
+def create_db(engine, models):
+    for model in models:
         try:
             model.__table__.create(engine)
         except OperationalError:
@@ -22,10 +33,10 @@ def create_db(engine):
             print(f"Таблица {model} создана в БД.")
 
 
-def connect(path):
+def get_server_session(path):
     database_engine = create_engine(f'sqlite:///{path}', echo=False, pool_recycle=7200,
                                     connect_args={'check_same_thread': False})
-    create_db(database_engine)
+    create_db(database_engine, server_models)
     Session = sessionmaker(bind=database_engine)
     session = Session()
 
@@ -65,11 +76,12 @@ def user_login(session, name, ip, port):
 def process_message(session, sender, recipient):
     sender = session.query(User).filter_by(name=sender).first().id
     recipient = session.query(User).filter_by(name=recipient).first().id
-    sender_row = session.query(History).filter_by(user=sender).first()
-    sender_row.sent += 1
-    recipient_row = session.query(History).filter_by(user=recipient).first()
-    recipient_row.accepted += 1
-    session.commit()
+    if sender and recipient:
+        sender_row = session.query(History).filter_by(user_id=sender).first()
+        sender_row.sent += 1
+        recipient_row = session.query(History).filter_by(user_id=recipient).first()
+        recipient_row.accepted += 1
+        session.commit()
 
 
 def get_contacts(session, username):
@@ -108,3 +120,52 @@ def users_list(session):
         User.last_login
     )
     return query.all()
+
+
+def message_history(session):
+    query = session.query(
+        User.name,
+        User.last_login,
+        History.sent,
+        History.accepted
+    ).join(User)
+    return query.all()
+
+
+def active_users_list(session):
+    query = session.query(
+        User.name,
+        ActiveUsers.ip_address,
+        ActiveUsers.port,
+        ActiveUsers.login_time
+    ).join(User)
+    return query.all()
+
+
+# client function
+def get_client_session(name):
+    database_engine = create_engine(f'sqlite:///./db/client_{name}.db3', echo=False, pool_recycle=7200,
+                                    connect_args={'check_same_thread': False})
+    create_db(database_engine, client_models)
+    Session = sessionmaker(bind=database_engine)
+    session = Session()
+
+    session.query(Contacts).delete()
+    session.commit()
+
+    return session
+
+
+def add_users(session, users_list):
+    session.query(KnownUsers).delete()
+    for user in users_list:
+        user_row = KnownUsers(user)
+        session.add(user_row)
+    session.commit()
+
+
+def add_client_contact(session, contact):
+    if not session.query(Contacts).filter_by(name=contact).count():
+        contact_row = Contacts(contact)
+        session.add(contact_row)
+        session.commit()

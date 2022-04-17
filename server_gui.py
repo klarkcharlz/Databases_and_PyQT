@@ -4,10 +4,12 @@ from PyQt5.QtWidgets import QMainWindow, QAction, qApp, QApplication, QLabel, QT
 from PyQt5.QtGui import QStandardItemModel, QStandardItem
 from PyQt5.QtCore import Qt
 
+from database.function import active_users_list, message_history
+
 
 # GUI - Создание таблицы QModel, для отображения в окне программы.
-def gui_create_model(database):
-    list_users = database.active_users_list()
+def gui_create_model(session):
+    list_users = active_users_list(session)
     list_table = QStandardItemModel()
     list_table.setHorizontalHeaderLabels(['Имя Клиента', 'IP Адрес', 'Порт', 'Время подключения'])
     for row in list_users:
@@ -26,9 +28,9 @@ def gui_create_model(database):
 
 
 # GUI - Функция реализующая заполнение таблицы историей сообщений.
-def create_stat_model(database):
+def create_stat_model(session):
     # Список записей из базы
-    hist_list = database.message_history()
+    hist_list = message_history(session)
 
     # Объект модели данных:
     list_table = QStandardItemModel()

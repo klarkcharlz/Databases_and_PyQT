@@ -5,6 +5,9 @@ import argparse
 from json import dumps, loads
 import dis
 import threading
+import sys
+import configparser
+import os
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QTimer
@@ -12,7 +15,7 @@ from server_gui import MainWindow, gui_create_model, HistoryWindow, create_stat_
 
 from log_conf.server_log_config import server_log
 from decos import Log
-from database.function import connect as connect_db
+from database.function import get_server_session as connect_db
 from database.function import (user_logout,
                                user_login,
                                process_message,
@@ -111,7 +114,8 @@ class ServerVerifier(type):
 class CustomServer(threading.Thread, metaclass=ServerVerifier):
     port = ValidPort()
 
-    def __init__(self, family: int, type_: int, interval: int or float, addr: str, port: int, max_clients: int) -> None:
+    def __init__(self, family: int, type_: int, interval: int or float, addr: str,
+                 port: int, max_clients: int, db_path: str) -> None:
         super().__init__()
         self.port = port
         self.family = family
@@ -121,7 +125,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         self.max_clients = max_clients
 
         self.server = None
-        self.session = connect_db("./db/server.db3")
+        self.session = connect_db(db_path)
 
         self.clients = []
         self.messages = []
@@ -157,7 +161,8 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
                 'to' in message and 'time' in message \
                 and 'from' in message and 'mess_text' in message:
             self.messages.append(message)
-            process_message(self.session, message['from'], message['to'])
+            if message['to'] in self.names:
+                process_message(self.session, message['from'], message['to'])
         # exit
         elif 'action' in message and message['action'] == 'exit' and 'account_name' in message:
             user_logout(self.session, message['account_name'])
@@ -170,6 +175,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         elif 'action' in message and message['action'] == 'get_contacts' and 'user' in message and \
                 self.names[message['user']] == client:
             response = {'response': 202,
+                        'type': 'get_contacts',
                         'data_list': get_contacts(self.session, message['user'])}
             self.send_message(client, response)
         # add
@@ -182,10 +188,11 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
                 and self.names[message['user']] == client:
             remove_contact(self.session, message['user'], message['account_name'])
             self.send_message(client, {'response': 200})
-        # Если это запрос известных пользователей
+        # get_users
         elif 'action' in message and message['action'] == 'get_users' and 'account_name' in message \
                 and self.names[message['account_name']] == client:
             response = {'response': 202,
+                        'type': 'get_users',
                         'data_list': [user[0] for user in users_list(self.session)]
                         }
             self.send_message(client, response)
@@ -259,7 +266,10 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
                         for client_with_message in recv_data_lst:
                             try:
                                 self.process_client_message(self.get_message(client_with_message), client_with_message)
-                            except:
+                            except Exception as err:
+                                print("ALLERT!!!!ERRORRRRORORORO!!!")
+                                print(type(err))
+                                print(err)
                                 server_log.info(f'Клиент {client_with_message.getpeername()} '
                                                 f'отключился от сервера.')
                                 for name in self.names:
@@ -282,18 +292,89 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
 
 
 def main():
+    config = configparser.ConfigParser()
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    config.read(f"{dir_path}/{'server.ini'}")
+
     my_serv = CustomServer(family=AF_INET,
                            type_=SOCK_STREAM,
                            interval=TIMEOUT,
                            addr=args.addr,
                            port=args.port,
-                           max_clients=5)
+                           max_clients=5,
+                           db_path=config['SETTINGS']['Database_path'])
     my_serv.daemon = True
     my_serv.start()
+
+    server_app = QApplication(sys.argv)
+    main_window = MainWindow()
+
+    main_window.statusBar().showMessage('Server Working')
+    main_window.active_clients_table.setModel(gui_create_model(my_serv.session))
+    main_window.active_clients_table.resizeColumnsToContents()
+    main_window.active_clients_table.resizeRowsToContents()
+
+    def list_update():
+        global new_connection
+        if new_connection:
+            main_window.active_clients_table.setModel(
+                gui_create_model(my_serv.session))
+            main_window.active_clients_table.resizeColumnsToContents()
+            main_window.active_clients_table.resizeRowsToContents()
+            with conflag_lock:
+                new_connection = False
+
+    def show_statistics():
+        global stat_window
+        stat_window = HistoryWindow()
+        stat_window.history_table.setModel(create_stat_model(my_serv.session))
+        stat_window.history_table.resizeColumnsToContents()
+        stat_window.history_table.resizeRowsToContents()
+        stat_window.show()
+
+    def server_config():
+        global config_window
+        config_window = ConfigWindow()
+        config_window.db_path.insert(config['SETTINGS']['Database_path'])
+        config_window.db_file.insert(config['SETTINGS']['Database_file'])
+        config_window.port.insert(config['SETTINGS']['Default_port'])
+        config_window.ip.insert(config['SETTINGS']['Listen_Address'])
+        config_window.save_btn.clicked.connect(save_server_config)
+
+    def save_server_config():
+        global config_window
+        message = QMessageBox()
+        config['SETTINGS']['Database_path'] = config_window.db_path.text()
+        config['SETTINGS']['Database_file'] = config_window.db_file.text()
+        try:
+            port = int(config_window.port.text())
+        except ValueError:
+            message.warning(config_window, 'Ошибка', 'Порт должен быть числом')
+        else:
+            config['SETTINGS']['Listen_Address'] = config_window.ip.text()
+            if 1023 < port < 65536:
+                config['SETTINGS']['Default_port'] = str(port)
+                print(port)
+                with open('server.ini', 'w') as conf:
+                    config.write(conf)
+                    message.information(
+                        config_window, 'OK', 'Настройки успешно сохранены!')
+            else:
+                message.warning(
+                    config_window,
+                    'Ошибка',
+                    'Порт должен быть от 1024 до 65536')
+
+    timer = QTimer()
+    timer.timeout.connect(list_update)
+    timer.start(1000)
+
+    main_window.refresh_button.triggered.connect(list_update)
+    main_window.show_history_button.triggered.connect(show_statistics)
+    main_window.config_btn.triggered.connect(server_config)
+
+    server_app.exec_()
 
 
 if __name__ == "__main__":
     main()
-    from time import sleep
-    while True:
-        sleep(1)

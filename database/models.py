@@ -5,7 +5,8 @@ from sqlalchemy import (Column,
                         Integer,
                         String,
                         DateTime,
-                        ForeignKey)
+                        ForeignKey,
+                        Text)
 
 
 Base = declarative_base()
@@ -74,7 +75,7 @@ class LoginHistory(Base):
 
 
 class UsersContacts(Base):
-    __tablename__ = 'contacts'
+    __tablename__ = 'user_contacts'
 
     id = Column(Integer, primary_key=True)
     user_id = Column(ForeignKey(User.id))
@@ -85,4 +86,45 @@ class UsersContacts(Base):
         self.contact = contact
 
 
-MODELS_LIST = [User, History, ActiveUsers, LoginHistory, UsersContacts]
+server_models = [User, History, ActiveUsers, LoginHistory, UsersContacts]
+
+
+# client
+class KnownUsers(Base):
+    __tablename__ = 'known_users'
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+
+    def __init__(self, user):
+        self.username = user
+
+
+class MessageHistory(Base):
+    __tablename__ = 'message_history'
+
+    id = Column(Integer, primary_key=True)
+    from_user = Column(String)
+    to_user = Column(String)
+    message = Column(Text)
+    date = Column(DateTime)
+
+    def __init__(self, from_user, to_user, message):
+        self.from_user = from_user
+        self.to_user = to_user
+        self.message = message
+        self.date = datetime.now()
+
+
+class Contacts(Base):
+    __tablename__ = 'client_contacts'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+
+    def __init__(self, contact):
+        self.id = None
+        self.name = contact
+
+
+client_models = [KnownUsers, MessageHistory, Contacts]
