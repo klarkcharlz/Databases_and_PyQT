@@ -286,6 +286,8 @@ def main():
     my_client.daemon = True
     my_client.start()
 
+    с = 44
+
     while True:
         sleep(1)
         if my_client.is_alive():
