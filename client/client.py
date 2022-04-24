@@ -5,13 +5,23 @@ from json import dumps, loads
 import sys
 import dis
 import threading
+import json
+
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import pyqtSignal, QObject
+
+sys.path.append('../')
 
 from log_conf.client_log_config import client_log
 from decos import Log
-
 from database.function import get_client_session as connect_db
-from database.function import add_users, add_client_contact
+from database.function import add_users, add_client_contact, save_message
 
+from client_gui import ClientMainWindow
+from start_dialog import UserNameDialog
+
+
+socket_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description='JSON instant messaging client.')
 parser.add_argument(
@@ -26,18 +36,17 @@ parser.add_argument(
     default=7777,
     help='Server port (default: 7777)'
 )
+parser.add_argument(
+    '-name',
+    type=str,
+    default="",
+    help='Username'
+)
+
 args = parser.parse_args()
 
 sock_lock = threading.Lock()
 database_lock = threading.Lock()
-
-
-class ServerError(Exception):
-    def __init__(self, text):
-        self.text = text
-
-    def __str__(self):
-        return self.text
 
 
 class ClientVerifier(type):
@@ -68,10 +77,13 @@ class ClientVerifier(type):
         super().__init__(class_name, bases, class_dict)
 
 
-class CustomClient(threading.Thread, metaclass=ClientVerifier):
+class CustomClient(threading.Thread, QObject):
+    new_message = pyqtSignal(str)
+    connection_lost = pyqtSignal()
 
     def __init__(self, family: int, type_: int, timeout_=None) -> None:
-        super().__init__()
+        threading.Thread.__init__(self)
+        QObject.__init__(self)
 
         self.client = socket(family, type_)
         if timeout_:
@@ -79,17 +91,66 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
         self.con = False
         self.addr = args.addr
         self.port = args.port
-        self.name = self.get_name()
+        self.name = args.name
         self.run_flag = None
         self.session = connect_db(self.name)
+        self.connect(self.addr, self.port)
 
-    @staticmethod
-    @Log(client_log)
-    def get_name():
-        name = ""
-        while not name:
-            name = input('Введите имя пользователя: ')
-        return name
+        self.user_list_update()
+        self.contacts_list_update()
+
+    def add_contact(self, contact):
+        client_log.debug(f'Создание контакта {contact}')
+        req = {
+            'action': 'add',
+            'time': int(time()),
+            'user': self.name,
+            'account_name': contact
+        }
+        with socket_lock:
+            self.send_message(req)
+
+    def remove_contact(self, contact):
+        client_log.debug(f'Удаление контакта {contact}')
+        req = {
+            'action': 'remove',
+            'time': int(time()),
+            'user': self.name,
+            'account_name': contact
+        }
+        with socket_lock:
+            self.send_message(req)
+
+    def user_list_update(self):
+        get_users_msg = self.create_get_users_msg()
+        with socket_lock:
+            self.send_message(get_users_msg)
+            sleep(0.5)
+        sleep(0.5)
+
+    def contacts_list_update(self):
+        get_contacts_msg = self.create_get_contacts_msg()
+        with socket_lock:
+            self.send_message(get_contacts_msg)
+            sleep(0.5)
+        sleep(0.5)
+
+    def create_message(self, to, message):
+        message_dict = {
+            'action': 'message',
+            'from': self.name,
+            'to': to,
+            'time': int(time()),
+            'mess_text': message
+        }
+        client_log.info(f'Сформирован словарь сообщения: {message_dict}')
+        try:
+            with socket_lock:
+                self.send_message(message_dict)
+            client_log.info(f'Отправлено сообщение для пользователя {to}')
+        except Exception as err:
+            client_log.exception(err)
+            sys.exit(1)
 
     @Log(client_log)
     def connect(self, address: str, port: int) -> None:
@@ -102,7 +163,13 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
             exit(1)
         else:
             self.con = True
+            self.run_flag = True
             client_log.info(f"Установлено соединение с сервером {address}:{port}.")
+            with socket_lock:
+                presence_msg = self.create_presence()
+                self.send_message(presence_msg)
+                sleep(0.5)
+            sleep(0.5)
 
     @Log(client_log)
     def disconnect(self) -> None:
@@ -135,7 +202,7 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
         if self.con:
             self.client.send(dumps(mess).encode('utf-8'))
             client_log.info(f"Отправлено сообщение: '{mess}'.")
-            if mess['action'] in ("presence", 'message'):
+            if mess['action'] in ("presence", 'message', 'exit'):
                 return
             response_data = self.__receive_msg()
             response_msg = self.__validate_response(response_data)
@@ -167,41 +234,21 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
                 for contact in data_list:
                     add_client_contact(self.session, contact)
 
+        elif 'action' in response \
+                and response['action'] == 'message' \
+                and 'from' in response \
+                and 'to' in response \
+                and 'mess_text' in response \
+                and response['to'] == self.name:
+            client_log.debug(f'Получено сообщение от пользователя {response["from"]}:'
+                             f'{response["mess_text"]}')
+            save_message(self.session, response['from'], 'in', response['mess_text'])
+            self.new_message.emit(response['from'])
+
     def message_from_server(self):
-        while self.run_flag:
-            sleep(0.1)
-            mes = self.__receive_msg()
-            mes = loads(self.__validate_response(mes))
-            self.parse_response(mes)
-
-    @staticmethod
-    def print_help():
-        print('Поддерживаемые команды:')
-        print('message - отправить сообщение. Кому и текст будет запрошены отдельно.')
-        print('help - вывести подсказки по командам')
-        print('exit - выход из программы')
-
-        print('history - история сообщений')
-        print('contacts - список контактов')
-        print('edit - редактирование списка контактов')
-
-    def create_message(self):
-        to_user = input('Введите получателя сообщения: ')
-        message = input('Введите сообщение для отправки: ')
-        message_dict = {
-            'action': 'message',
-            'from': self.name,
-            'to': to_user,
-            'time': int(time()),
-            'mess_text': message
-        }
-        client_log.info(f'Сформирован словарь сообщения: {message_dict}')
-        try:
-            self.send_message(message_dict)
-            client_log.info(f'Отправлено сообщение для пользователя {to_user}')
-        except Exception as err:
-            client_log.exception(err)
-            sys.exit(1)
+        mes = self.__receive_msg()
+        mes = loads(self.__validate_response(mes))
+        self.parse_response(mes)
 
     def create_exit_message(self):
         """Функция создаёт словарь с сообщением о выходе"""
@@ -211,24 +258,15 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
             'account_name': self.name
         }
 
-    def user_interactive(self, ):
-        while True:
-            command = input('Введите команду: ')
-            if command == 'message':
-                self.create_message()
-            elif command == 'help':
-                self.print_help()
-            elif command == 'exit':
-                self.send_message(self.create_exit_message())
-                print('Завершение соединения.')
-                client_log.info('Завершение работы по команде пользователя.')
-                self.disconnect()
-                self.run_flag = False
-                # Задержка неоходима, чтобы успело уйти сообщение о выходе
-                sleep(0.5)
-                break
-            else:
-                print('Команда не распознана, попробойте снова. help - вывести поддерживаемые команды.')
+    def shutdown(self):
+        with socket_lock:
+            self.send_message(self.create_exit_message())
+            sleep(0.5)
+        print('Завершение соединения.')
+        client_log.info('Завершение работы по команде пользователя.')
+        self.disconnect()
+        self.run_flag = False
+        sleep(0.5)
 
     def create_get_users_msg(self):
         client_log.info(f'Запрос списка известных пользователей {self.name}')
@@ -248,51 +286,51 @@ class CustomClient(threading.Thread, metaclass=ClientVerifier):
 
     @Log(client_log)
     def run(self):
-        self.connect(self.addr, self.port)
-        self.run_flag = True
-
-        try:
-            presence_msg = self.create_presence()
-            self.send_message(presence_msg)
-            sleep(0.5)
-            get_users_msg = self.create_get_users_msg()
-            self.send_message(get_users_msg)
-            sleep(0.5)
-            get_contacts_msg = self.create_get_contacts_msg()
-            self.send_message(get_contacts_msg)
-            sleep(0.5)
-        except Exception as err:
-            client_log.exception(err)
-            exit(1)
-        else:
-            receiver = threading.Thread(target=self.message_from_server)
-            receiver.daemon = True
-            receiver.start()
-            user_interface = threading.Thread(target=self.user_interactive)
-            user_interface.daemon = True
-            user_interface.start()
-            client_log.info('Запущены процессы')
-            while True:
-                sleep(0.01)
-                if receiver.is_alive() and user_interface.is_alive():
-                    continue
-                print("Выход из клиентской программы.")
-                self.run_flag = False
-                break
+        while self.run_flag:
+            sleep(1)
+            with socket_lock:
+                try:
+                    self.client.settimeout(0.5)
+                    self.message_from_server()
+                except OSError as err:
+                    if err.errno:
+                        client_log.critical(f'Потеряно соединение с сервером.')
+                        self.run_flag = False
+                        self.connection_lost.emit()
+                except (ConnectionError, ConnectionAbortedError,
+                        ConnectionResetError, json.JSONDecodeError, TypeError):
+                    client_log.debug(f'Потеряно соединение с сервером.')
+                    self.run_flag = False
+                    self.connection_lost.emit()
+                else:
+                    pass
+                finally:
+                    self.client.settimeout(5)
 
 
 def main():
+    client_app = QApplication(sys.argv)
+
+    if not args.name:
+        start_dialog = UserNameDialog()
+        client_app.exec_()
+        if start_dialog.ok_pressed:
+            args.name = start_dialog.client_name.text()
+            del start_dialog
+        else:
+            exit(0)
+
     my_client = CustomClient(AF_INET, SOCK_STREAM)
     my_client.daemon = True
     my_client.start()
 
-    с = 44
+    main_window = ClientMainWindow(my_client)
+    main_window.make_connection(my_client)
+    main_window.setWindowTitle(f'Чат Программа alpha release - {my_client.name}')
+    client_app.exec_()
 
-    while True:
-        sleep(1)
-        if my_client.is_alive():
-            continue
-        break
+    my_client.shutdown()
+    my_client.join()
 
 
 if __name__ == "__main__":

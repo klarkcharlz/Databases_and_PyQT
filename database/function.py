@@ -12,7 +12,8 @@ from .models import (server_models,
                      LoginHistory,
                      UsersContacts,
                      Contacts,
-                     KnownUsers)
+                     KnownUsers,
+                     MessageHistory)
 
 
 class ServerError(Exception):
@@ -86,7 +87,7 @@ def process_message(session, sender, recipient):
 
 def get_contacts(session, username):
     user = session.query(User).filter_by(name=username).one()
-    query = session.query(UsersContacts, User). \
+    query = session.query(UsersContacts, User.name). \
         filter_by(user_id=user.id). \
         join(User, UsersContacts.contact == User.id)
     return [contact[1] for contact in query.all()]
@@ -169,3 +170,42 @@ def add_client_contact(session, contact):
         contact_row = Contacts(contact)
         session.add(contact_row)
         session.commit()
+
+
+def get_history(session, contact):
+    query = session.query(MessageHistory).filter_by(contact=contact)
+    return [(history_row.contact, history_row.direction,
+             history_row.message, history_row.date)
+            for history_row in query.all()]
+
+
+def get_client_contacts(session):
+    return [contact[0] for contact in session.query(Contacts.name).all()]
+
+
+def del_contact(session, contact):
+    session.query(Contacts).filter_by(name=contact).delete()
+    session.commit()
+
+
+def save_message(session, contact, direction, message):
+    message_row = MessageHistory(contact, direction, message)
+    session.add(message_row)
+    session.commit()
+
+
+def check_contact(session, contact):
+    if session.query(Contacts).filter_by(name=contact).count():
+        return True
+    else:
+        return False
+
+
+def get_users(session):
+    return [user[0] for user in session.query(KnownUsers.username).all()]
+
+
+def save_message(session, contact, direction, message):
+    message_row = MessageHistory(contact, direction, message)
+    session.add(message_row)
+    session.commit()

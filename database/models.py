@@ -104,14 +104,14 @@ class MessageHistory(Base):
     __tablename__ = 'message_history'
 
     id = Column(Integer, primary_key=True)
-    from_user = Column(String)
-    to_user = Column(String)
+    contact = Column(String)
+    direction = Column(String)
     message = Column(Text)
     date = Column(DateTime)
 
-    def __init__(self, from_user, to_user, message):
-        self.from_user = from_user
-        self.to_user = to_user
+    def __init__(self, contact, direction, message):
+        self.contact = contact
+        self.direction = direction
         self.message = message
         self.date = datetime.now()
 

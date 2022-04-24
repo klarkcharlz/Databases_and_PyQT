@@ -205,11 +205,16 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         encoded_response = client.recv(1024)
         if isinstance(encoded_response, bytes):
             json_response = encoded_response.decode('utf-8')
-            response = loads(json_response)
-            if isinstance(response, dict):
-                return response
+            try:
+                response = loads(json_response)
+            except Exception as err:
+                server_log.error(f"Некорректное сообщение от клиента:\n{json_response}")
+                raise err
             else:
-                raise IncorrectDataRecivedError
+                if isinstance(response, dict):
+                    return response
+                else:
+                    raise IncorrectDataRecivedError
         else:
             raise IncorrectDataRecivedError
 
@@ -252,24 +257,21 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
                 recv_data_lst = []
                 send_data_lst = []
                 try:
-                    # print(clients)
-                    # print(recv_data_lst)
-                    # print(send_data_lst)
                     if self.clients:
                         recv_data_lst, send_data_lst, err_lst = select(self.clients, self.clients, [], 0)
                 except Exception as err:
                     server_log.exception(err)
                 else:
                     # принимаем сообщения и если ошибка, исключаем клиента.
-                    # print(recv_data_lst)
                     if recv_data_lst and self.clients:
                         for client_with_message in recv_data_lst:
                             try:
                                 self.process_client_message(self.get_message(client_with_message), client_with_message)
                             except Exception as err:
-                                print("ALLERT!!!!ERRORRRRORORORO!!!")
-                                print(type(err))
-                                print(err)
+                                server_log.error("Ошибка обработки клиентского сообщения.")
+                                server_log.error(type(err))
+                                server_log.error(err)
+                                server_log.exception(err)
                                 server_log.info(f'Клиент {client_with_message.getpeername()} '
                                                 f'отключился от сервера.')
                                 for name in self.names:
@@ -354,7 +356,6 @@ def main():
             config['SETTINGS']['Listen_Address'] = config_window.ip.text()
             if 1023 < port < 65536:
                 config['SETTINGS']['Default_port'] = str(port)
-                print(port)
                 with open('server.ini', 'w') as conf:
                     config.write(conf)
                     message.information(
