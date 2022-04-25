@@ -53,6 +53,11 @@ def user_logout(session, name):
     session.commit()
 
 
+def get_pubkey(session, name):
+    user = session.query(User).filter_by(name=name).first()
+    return user.pubkey
+
+
 def user_login(session, name, ip, port):
     rez = session.query(User).filter_by(name=name)
     if rez.count():
@@ -145,7 +150,7 @@ def active_users_list(session):
 
 # client function
 def get_client_session(name):
-    database_engine = create_engine(f'sqlite:///./db/client_{name}.db3', echo=False, pool_recycle=7200,
+    database_engine = create_engine(f'sqlite:///./client/db/client_{name}.db3', echo=False, pool_recycle=7200,
                                     connect_args={'check_same_thread': False})
     create_db(database_engine, client_models)
     Session = sessionmaker(bind=database_engine)
@@ -209,3 +214,10 @@ def save_message(session, contact, direction, message):
     message_row = MessageHistory(contact, direction, message)
     session.add(message_row)
     session.commit()
+
+
+def check_user(session, user):
+    if session.query(KnownUsers).filter_by(username=user).count():
+        return True
+    else:
+        return False

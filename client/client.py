@@ -6,9 +6,14 @@ import sys
 import dis
 import threading
 import json
+import os
+import hashlib
+import binascii
+import hmac
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import pyqtSignal, QObject
+from Cryptodome.PublicKey import RSA
 
 sys.path.append('../')
 
@@ -17,9 +22,9 @@ from decos import Log
 from database.function import get_client_session as connect_db
 from database.function import add_users, add_client_contact, save_message
 
-from client_gui import ClientMainWindow
-from start_dialog import UserNameDialog
-
+from .client_gui import ClientMainWindow
+from .start_dialog import UserNameDialog
+from .errors import ServerError
 
 socket_lock = threading.Lock()
 
@@ -41,6 +46,13 @@ parser.add_argument(
     type=str,
     default="",
     help='Username'
+)
+
+parser.add_argument(
+    '-pas',
+    type=str,
+    default="",
+    help='Password'
 )
 
 args = parser.parse_args()
@@ -80,8 +92,9 @@ class ClientVerifier(type):
 class CustomClient(threading.Thread, QObject):
     new_message = pyqtSignal(str)
     connection_lost = pyqtSignal()
+    message_205 = pyqtSignal()
 
-    def __init__(self, family: int, type_: int, timeout_=None) -> None:
+    def __init__(self, family: int, type_: int, keys, timeout_=None) -> None:
         threading.Thread.__init__(self)
         QObject.__init__(self)
 
@@ -92,12 +105,28 @@ class CustomClient(threading.Thread, QObject):
         self.addr = args.addr
         self.port = args.port
         self.name = args.name
+        self.password = args.pas
         self.run_flag = None
+        self.keys = keys
         self.session = connect_db(self.name)
         self.connect(self.addr, self.port)
 
-        self.user_list_update()
-        self.contacts_list_update()
+        try:
+            self.user_list_update()
+            self.contacts_list_update()
+        except OSError as err:
+            if err.errno:
+                client_log.critical(f'Потеряно соединение с сервером.')
+                raise ServerError('Потеряно соединение с сервером!')
+            client_log.error(
+                'Timeout соединения при обновлении списков пользователей.')
+        except json.JSONDecodeError:
+            client_log.critical(f'Потеряно соединение с сервером.')
+            raise ServerError('Потеряно соединение с сервером!')
+
+        self.passwd_hash_string = None
+        self.pubkey = None
+        self.need_key = None
 
     def add_contact(self, contact):
         client_log.debug(f'Создание контакта {contact}')
@@ -160,8 +189,14 @@ class CustomClient(threading.Thread, QObject):
         except Exception as err:
             client_log.error(f"Неудалось установить соединение с вервером {address}:{port}")
             client_log.exception(err)
-            exit(1)
+            raise ServerError('Не удалось установить соединение с сервером')
         else:
+            passwd_bytes = self.password.encode('utf-8')
+            salt = self.username.lower().encode('utf-8')
+            passwd_hash = hashlib.pbkdf2_hmac('sha512', passwd_bytes, salt, 10000)
+            self.passwd_hash_string = binascii.hexlify(passwd_hash)
+            self.pubkey = self.keys.publickey().export_key().decode('ascii')
+
             self.con = True
             self.run_flag = True
             client_log.info(f"Установлено соединение с сервером {address}:{port}.")
@@ -197,16 +232,18 @@ class CustomClient(threading.Thread, QObject):
             return data
 
     @Log(client_log)
-    def send_message(self, mess: dict) -> None:
+    def send_message(self, mess: dict) -> None or dict:
         """Отправка сообщения серверу"""
         if self.con:
             self.client.send(dumps(mess).encode('utf-8'))
             client_log.info(f"Отправлено сообщение: '{mess}'.")
-            if mess['action'] in ("presence", 'message', 'exit'):
+            if mess['action'] in ('message', 'exit'):
                 return
             response_data = self.__receive_msg()
             response_msg = self.__validate_response(response_data)
             client_log.info(f"Получено сообщение: '{response_msg}'.")
+            if mess['action'] == 'pubkey_need':
+                return response_msg
             self.parse_response(loads(response_msg))
         else:
             client_log.warning(f"Отправка сообщения невозможна, соединение с сервером небыло установленно.")
@@ -234,6 +271,14 @@ class CustomClient(threading.Thread, QObject):
                 for contact in data_list:
                     add_client_contact(self.session, contact)
 
+        elif response['response'] == 205:
+            self.user_list_update()
+            self.contacts_list_update()
+            self.message_205.emit()
+
+        elif response['response'] == 400:
+            raise ServerError(f'{response["error"]}')
+
         elif 'action' in response \
                 and response['action'] == 'message' \
                 and 'from' in response \
@@ -244,6 +289,31 @@ class CustomClient(threading.Thread, QObject):
                              f'{response["mess_text"]}')
             save_message(self.session, response['from'], 'in', response['mess_text'])
             self.new_message.emit(response['from'])
+
+        elif response['response'] == 400:
+            raise ServerError(response['error'])
+
+        elif response['response'] == 511:
+            ans_data = response['bin']
+            hash = hmac.new(self.passwd_hash_string, ans_data.encode('utf-8'), 'MD5')
+            digest = hash.digest()
+            my_ans = {'response': 511, 'bin': binascii.b2a_base64(
+                digest).decode('ascii')}
+            self.send_message(self.transport, my_ans)
+
+    def key_request(self, user):
+        client_log.debug(f'Запрос публичного ключа для {user}')
+        req = {
+            'action': 'pubkey_need',
+            'time': int(time()),
+            'account_name': user
+        }
+        with socket_lock:
+            data = self.send_message(req)
+            if data:
+                return data
+            else:
+                client_log.error(f'Не удалось получить ключ собеседника{user}.')
 
     def message_from_server(self):
         mes = self.__receive_msg()
@@ -311,20 +381,38 @@ class CustomClient(threading.Thread, QObject):
 def main():
     client_app = QApplication(sys.argv)
 
-    if not args.name:
-        start_dialog = UserNameDialog()
+    start_dialog = UserNameDialog()
+    if not args.name or not args.pas:
+
         client_app.exec_()
         if start_dialog.ok_pressed:
             args.name = start_dialog.client_name.text()
-            del start_dialog
+            args.pas = start_dialog.client_passwd.text()
         else:
             exit(0)
 
-    my_client = CustomClient(AF_INET, SOCK_STREAM)
-    my_client.daemon = True
-    my_client.start()
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    key_file = os.path.join(dir_path, f'{args.name}.key')
+    if not os.path.exists(key_file):
+        keys = RSA.generate(2048, os.urandom)
+        with open(key_file, 'wb') as key:
+            key.write(keys.export_key())
+    else:
+        with open(key_file, 'rb') as key:
+            keys = RSA.import_key(key.read())
 
-    main_window = ClientMainWindow(my_client)
+    try:
+        my_client = CustomClient(AF_INET, SOCK_STREAM, keys)
+        my_client.daemon = True
+        my_client.start()
+    except ServerError as error:
+        message = QMessageBox()
+        message.critical(start_dialog, 'Ошибка сервера', error.text)
+        exit(1)
+
+    del start_dialog
+
+    main_window = ClientMainWindow(my_client, keys)
     main_window.make_connection(my_client)
     main_window.setWindowTitle(f'Чат Программа alpha release - {my_client.name}')
     client_app.exec_()
