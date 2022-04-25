@@ -1,12 +1,14 @@
-"""Тестирование сервера"""
+"""Тестирование сервера
+p.s. устарело и не обновлялось.
+"""
 from multiprocessing import Process
 from multiprocessing import set_start_method
 from time import time
 from socket import AF_INET, SOCK_STREAM
 from unittest import TestCase, main
 
-from client import CustomClient
-from server import CustomServer
+from client.client import CustomClient
+from .server import CustomServer
 
 
 class TestClientServerApplication(TestCase):

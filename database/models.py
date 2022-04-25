@@ -18,9 +18,12 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     last_login = Column(DateTime, default=datetime.now())
+    passwd_hash = Column(String)
+    pubkey = Column(Text)
 
-    def __init__(self, name):
+    def __init__(self, name, passwd_hash):
         self.name = name
+        self.passwd_hash = passwd_hash
 
     def __repr__(self):
         return f"{self.name}"

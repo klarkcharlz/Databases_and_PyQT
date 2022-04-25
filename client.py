@@ -1,4 +1,4 @@
-from server.server import main
+from client.client import main
 
 
 if __name__ == "__main__":
