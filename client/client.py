@@ -1,3 +1,5 @@
+"""Главный класс клиентского приложения"""
+
 from socket import socket, AF_INET, SOCK_STREAM
 import argparse
 from time import time, sleep
@@ -90,6 +92,7 @@ class ClientVerifier(type):
 
 
 class CustomClient(threading.Thread, QObject):
+    """Клиентский класс"""
     new_message = pyqtSignal(str)
     connection_lost = pyqtSignal()
     message_205 = pyqtSignal()
@@ -129,6 +132,7 @@ class CustomClient(threading.Thread, QObject):
         self.need_key = None
 
     def add_contact(self, contact):
+        """Добавление контакта"""
         client_log.debug(f'Создание контакта {contact}')
         req = {
             'action': 'add',
@@ -140,6 +144,7 @@ class CustomClient(threading.Thread, QObject):
             self.send_message(req)
 
     def remove_contact(self, contact):
+        """Удаление контакта"""
         client_log.debug(f'Удаление контакта {contact}')
         req = {
             'action': 'remove',
@@ -151,6 +156,7 @@ class CustomClient(threading.Thread, QObject):
             self.send_message(req)
 
     def user_list_update(self):
+        """Обновление списка пользователей"""
         get_users_msg = self.create_get_users_msg()
         with socket_lock:
             self.send_message(get_users_msg)
@@ -158,6 +164,7 @@ class CustomClient(threading.Thread, QObject):
         sleep(0.5)
 
     def contacts_list_update(self):
+        """Обновление списка контактов"""
         get_contacts_msg = self.create_get_contacts_msg()
         with socket_lock:
             self.send_message(get_contacts_msg)
@@ -165,6 +172,7 @@ class CustomClient(threading.Thread, QObject):
         sleep(0.5)
 
     def create_message(self, to, message):
+        """Создание сообщения"""
         message_dict = {
             'action': 'message',
             'from': self.name,
@@ -249,6 +257,7 @@ class CustomClient(threading.Thread, QObject):
             client_log.warning(f"Отправка сообщения невозможна, соединение с сервером небыло установленно.")
 
     def create_presence(self):
+        """Создание presence сообщения"""
         out = {
             "action": "presence",
             'time': int(time()),
@@ -261,6 +270,7 @@ class CustomClient(threading.Thread, QObject):
         return out
 
     def parse_response(self, response: dict):
+        """Разбор ответа от сервера"""
         if 'response' in response and response['response'] == 202:
             data_list = response['data_list']
             if response['type'] == 'get_users':
@@ -302,6 +312,7 @@ class CustomClient(threading.Thread, QObject):
             self.send_message(self.transport, my_ans)
 
     def key_request(self, user):
+        """Запрос ключей"""
         client_log.debug(f'Запрос публичного ключа для {user}')
         req = {
             'action': 'pubkey_need',
@@ -316,6 +327,7 @@ class CustomClient(threading.Thread, QObject):
                 client_log.error(f'Не удалось получить ключ собеседника{user}.')
 
     def message_from_server(self):
+        """Ожидание сообщение от сервера"""
         mes = self.__receive_msg()
         mes = loads(self.__validate_response(mes))
         self.parse_response(mes)
@@ -329,6 +341,7 @@ class CustomClient(threading.Thread, QObject):
         }
 
     def shutdown(self):
+        """Отключение клиента"""
         with socket_lock:
             self.send_message(self.create_exit_message())
             sleep(0.5)
@@ -339,6 +352,7 @@ class CustomClient(threading.Thread, QObject):
         sleep(0.5)
 
     def create_get_users_msg(self):
+        """Создание сообщения на запрос пользователей"""
         client_log.info(f'Запрос списка известных пользователей {self.name}')
         return {
             'action': 'get_users',
@@ -347,6 +361,7 @@ class CustomClient(threading.Thread, QObject):
         }
 
     def create_get_contacts_msg(self):
+        """Создание сообщения на запрос контактов"""
         client_log.info(f'Запрос контакт листа для пользователя {self.name}')
         return {
             'action': 'get_contacts',
@@ -356,6 +371,7 @@ class CustomClient(threading.Thread, QObject):
 
     @Log(client_log)
     def run(self):
+        """Запуск клиента"""
         while self.run_flag:
             sleep(1)
             with socket_lock:
@@ -379,6 +395,7 @@ class CustomClient(threading.Thread, QObject):
 
 
 def main():
+    """Основная функция, подготовка и запуск клиентского приложения"""
     client_app = QApplication(sys.argv)
 
     start_dialog = UserNameDialog()

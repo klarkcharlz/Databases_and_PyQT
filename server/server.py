@@ -112,6 +112,7 @@ class ServerVerifier(type):
 
 
 class CustomServer(threading.Thread, metaclass=ServerVerifier):
+    """Серверное приложение"""
     port = ValidPort()
 
     def __init__(self, family: int, type_: int, interval: int or float, addr: str,
@@ -132,6 +133,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         self.names = dict()
 
     def init_sock(self):
+        """Инициализация сокета"""
         self.server = socket(self.family, self.type_)
         self.server.settimeout(self.interval)
         self.server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -139,6 +141,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         self.server.listen(self.max_clients)
 
     def process_client_message(self, message, client):
+        """Разбор клиентского сообщения"""
         global new_connection
         server_log.info(f'Разбор сообщения от клиента : {message}')
         # presence
@@ -215,6 +218,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
             self.send_message(client, response)
 
     def remove_client(self, client):
+        """Удаление клиента"""
         server_log.info(f'Клиент {client.getpeername()} отключился от сервера.')
         for name in self.names:
             if self.names[name] == client:
@@ -226,6 +230,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
 
     @staticmethod
     def get_message(client):
+        """Получение сообщения"""
         encoded_response = client.recv(1024)
         if isinstance(encoded_response, bytes):
             json_response = encoded_response.decode('utf-8')
@@ -244,6 +249,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
 
     @staticmethod
     def send_message(sock, message):
+        """Отправка сообщения"""
         if not isinstance(message, dict):
             raise NonDictInputError
         js_message = dumps(message)
@@ -251,6 +257,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
         sock.send(encoded_message)
 
     def process_message(self, message, listen_socks):
+        """Разбор сообщений"""
         if message['to'] in self.names and self.names[message['to']] in listen_socks:
             self.send_message(self.names[message['to']], message)
             server_log.info(f'Отправлено сообщение пользователю {message["to"]} от пользователя {message["from"]}.')
@@ -318,6 +325,7 @@ class CustomServer(threading.Thread, metaclass=ServerVerifier):
 
 
 def main():
+    """Основная функция подготовки и запуска серверного приложения"""
     config = configparser.ConfigParser()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     config.read(f"{dir_path}/{'server.ini'}")
@@ -341,6 +349,7 @@ def main():
     main_window.active_clients_table.resizeRowsToContents()
 
     def list_update():
+        """Обновление списка пользователей"""
         global new_connection
         if new_connection:
             main_window.active_clients_table.setModel(
@@ -351,6 +360,7 @@ def main():
                 new_connection = False
 
     def show_statistics():
+        """Показ статистики"""
         global stat_window
         stat_window = HistoryWindow()
         stat_window.history_table.setModel(create_stat_model(my_serv.session))
@@ -359,6 +369,7 @@ def main():
         stat_window.show()
 
     def server_config():
+        """Конфигурация сервера"""
         global config_window
         config_window = ConfigWindow()
         config_window.db_path.insert(config['SETTINGS']['Database_path'])
@@ -368,6 +379,7 @@ def main():
         config_window.save_btn.clicked.connect(save_server_config)
 
     def save_server_config():
+        """Сохранение конфигурации сервера"""
         global config_window
         message = QMessageBox()
         config['SETTINGS']['Database_path'] = config_window.db_path.text()

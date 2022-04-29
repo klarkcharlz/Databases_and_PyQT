@@ -1,3 +1,5 @@
+"""Логгер сервера"""
+
 import logging
 import os
 import sys

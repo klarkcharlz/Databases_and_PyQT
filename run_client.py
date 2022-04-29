@@ -1,3 +1,7 @@
+"""
+Запуск клиентского приложения
+"""
+
 from client.client import main
 
 

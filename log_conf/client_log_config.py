@@ -1,3 +1,5 @@
+"""Клиентский логгер"""
+
 import logging
 import os
 import sys
