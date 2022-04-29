@@ -1,3 +1,7 @@
+"""
+Запуск серверного приложения
+"""
+
 from server.server import main
 
 

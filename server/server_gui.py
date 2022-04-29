@@ -1,3 +1,6 @@
+"""Графическая оболочка сервера"""
+
+
 import sys
 from PyQt5.QtWidgets import QMainWindow, QAction, qApp, QApplication, QLabel, QTableView, QDialog, QPushButton, \
     QLineEdit, QFileDialog
@@ -7,8 +10,8 @@ from PyQt5.QtCore import Qt
 from database.function import active_users_list, message_history
 
 
-# GUI - Создание таблицы QModel, для отображения в окне программы.
 def gui_create_model(session):
+    """GUI - Создание таблицы QModel, для отображения в окне программы."""
     list_users = active_users_list(session)
     list_table = QStandardItemModel()
     list_table.setHorizontalHeaderLabels(['Имя Клиента', 'IP Адрес', 'Порт', 'Время подключения'])
@@ -27,8 +30,8 @@ def gui_create_model(session):
     return list_table
 
 
-# GUI - Функция реализующая заполнение таблицы историей сообщений.
 def create_stat_model(session):
+    """GUI - Функция реализующая заполнение таблицы историей сообщений."""
     # Список записей из базы
     hist_list = message_history(session)
 
@@ -50,14 +53,14 @@ def create_stat_model(session):
     return list_table
 
 
-# Класс основного окна
 class MainWindow(QMainWindow):
+    """Класс основного окна"""
     def __init__(self):
         super().__init__()
         self.initUI()
 
     def initUI(self):
-        # Кнопка выхода
+        """Кнопка выхода"""
         self.exitAction = QAction('Выход', self)
         self.exitAction.setShortcut('Ctrl+Q')
         self.exitAction.triggered.connect(qApp.quit)
@@ -101,14 +104,14 @@ class MainWindow(QMainWindow):
         self.show()
 
 
-# Класс окна с историей пользователей
 class HistoryWindow(QDialog):
+    """Класс окна с историей пользователей"""
     def __init__(self):
         super().__init__()
         self.initUI()
 
     def initUI(self):
-        # Настройки окна:
+        """Настройки окна"""
         self.setWindowTitle('Статистика клиентов')
         self.setFixedSize(600, 700)
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -126,14 +129,14 @@ class HistoryWindow(QDialog):
         self.show()
 
 
-# Класс окна настроек
 class ConfigWindow(QDialog):
+    """Класс окна настроек"""
     def __init__(self):
         super().__init__()
         self.initUI()
 
     def initUI(self):
-        # Настройки окна
+        """Настройки окна"""
         self.setFixedSize(365, 260)
         self.setWindowTitle('Настройки сервера')
 
@@ -152,8 +155,8 @@ class ConfigWindow(QDialog):
         self.db_path_select = QPushButton('Обзор...', self)
         self.db_path_select.move(275, 28)
 
-        # Функция обработчик открытия окна выбора папки
         def open_file_dialog():
+            """Функция обработчик открытия окна выбора папки"""
             global dialog
             dialog = QFileDialog(self)
             path = dialog.getExistingDirectory()
@@ -207,18 +210,3 @@ class ConfigWindow(QDialog):
         self.close_button.clicked.connect(self.close)
 
         self.show()
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    main_window = MainWindow()
-    main_window.statusBar().showMessage('Test Statusbar Message')
-    test_list = QStandardItemModel(main_window)
-    test_list.setHorizontalHeaderLabels(['Имя Клиента', 'IP Адрес', 'Порт', 'Время подключения'])
-    test_list.appendRow(
-        [QStandardItem('test1'), QStandardItem('192.198.0.5'), QStandardItem('23544'), QStandardItem('16:20:34')])
-    test_list.appendRow(
-        [QStandardItem('test2'), QStandardItem('192.198.0.8'), QStandardItem('33245'), QStandardItem('16:22:11')])
-    main_window.active_clients_table.setModel(test_list)
-    main_window.active_clients_table.resizeColumnsToContents()
-    app.exec_()

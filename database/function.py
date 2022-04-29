@@ -1,3 +1,7 @@
+"""
+Функции для взаимодействия с БД
+"""
+
 from datetime import datetime
 
 from sqlalchemy import create_engine
@@ -17,6 +21,7 @@ from .models import (server_models,
 
 
 class ServerError(Exception):
+    """Ошибка со стороны сервера"""
     def __init__(self, text):
         self.text = text
 
@@ -25,6 +30,12 @@ class ServerError(Exception):
 
 
 def create_db(engine, models):
+    """
+    Создание базы данных
+    :param engine: движок
+    :param models: список моделей
+    :return:
+    """
     for model in models:
         try:
             model.__table__.create(engine)
@@ -35,6 +46,11 @@ def create_db(engine, models):
 
 
 def get_server_session(path):
+    """
+    Создание сессии для сервера
+    :param path: путь до бд
+    :return: сессия
+    """
     database_engine = create_engine(f'sqlite:///{path}', echo=False, pool_recycle=7200,
                                     connect_args={'check_same_thread': False})
     create_db(database_engine, server_models)
@@ -48,17 +64,37 @@ def get_server_session(path):
 
 
 def user_logout(session, name):
+    """
+    выход пользователя
+    :param session: сессия
+    :param name: юзернейм пользователя
+    :return:
+    """
     user = session.query(User).filter_by(name=name).first()
     session.query(ActiveUsers).filter_by(user_id=user.id).delete()
     session.commit()
 
 
 def get_pubkey(session, name):
+    """
+    Получение ключа
+    :param session: сессия
+    :param name: юзернейм пользователя
+    :return: ключ
+    """
     user = session.query(User).filter_by(name=name).first()
     return user.pubkey
 
 
 def user_login(session, name, ip, port):
+    """
+    Подключение пользователя
+    :param session: сессия
+    :param name: юзернейм
+    :param ip: ip адресс
+    :param port: порт
+    :return:
+    """
     rez = session.query(User).filter_by(name=name)
     if rez.count():
         user = rez.first()
@@ -80,6 +116,13 @@ def user_login(session, name, ip, port):
 
 
 def process_message(session, sender, recipient):
+    """
+
+    :param session:
+    :param sender:
+    :param recipient:
+    :return:
+    """
     sender = session.query(User).filter_by(name=sender).first().id
     recipient = session.query(User).filter_by(name=recipient).first().id
     if sender and recipient:
@@ -91,6 +134,12 @@ def process_message(session, sender, recipient):
 
 
 def get_contacts(session, username):
+    """
+    Получение списка контактов
+    :param session: сессия
+    :param username: юзернейм
+    :return: контакт
+    """
     user = session.query(User).filter_by(name=username).one()
     query = session.query(UsersContacts, User.name). \
         filter_by(user_id=user.id). \
@@ -99,6 +148,13 @@ def get_contacts(session, username):
 
 
 def add_contact(session, user, contact):
+    """
+    Добавление контакта
+    :param session: сессия
+    :param user: юзернейм
+    :param contact: контакт
+    :return:
+    """
     user = session.query(User).filter_by(name=user).first()
     contact = session.query(User).filter_by(name=contact).first()
     if not contact or session.query(UsersContacts).filter_by(user_id=user.id, contact=contact.id).count():
@@ -109,6 +165,13 @@ def add_contact(session, user, contact):
 
 
 def remove_contact(session, user, contact):
+    """
+    Удаление контакта
+    :param session: сессия
+    :param user: юзернейм
+    :param contact: контакт
+    :return:
+    """
     user = session.query(User).filter_by(name=user).first()
     contact = session.query(User).filter_by(name=contact).first()
     if not contact:
@@ -121,6 +184,11 @@ def remove_contact(session, user, contact):
 
 
 def users_list(session):
+    """
+    Получение списка пользователей
+    :param session: сессия
+    :return: список пользователей
+    """
     query = session.query(
         User.name,
         User.last_login
@@ -129,6 +197,11 @@ def users_list(session):
 
 
 def message_history(session):
+    """
+    Получение истории сообщений
+    :param session: сессия
+    :return: история сообщений
+    """
     query = session.query(
         User.name,
         User.last_login,
@@ -139,6 +212,11 @@ def message_history(session):
 
 
 def active_users_list(session):
+    """
+    Получение списка активных пользователей
+    :param session: сессия
+    :return: список активных пользователей
+    """
     query = session.query(
         User.name,
         ActiveUsers.ip_address,
@@ -150,6 +228,11 @@ def active_users_list(session):
 
 # client function
 def get_client_session(name):
+    """
+    Получение клиентской сессии
+    :param name: юзернейм
+    :return: сессия
+    """
     database_engine = create_engine(f'sqlite:///./client/db/client_{name}.db3', echo=False, pool_recycle=7200,
                                     connect_args={'check_same_thread': False})
     create_db(database_engine, client_models)
@@ -163,6 +246,12 @@ def get_client_session(name):
 
 
 def add_users(session, users_list):
+    """
+    Добавление пользователей
+    :param session: сессия
+    :param users_list: список пользователей
+    :return:
+    """
     session.query(KnownUsers).delete()
     for user in users_list:
         user_row = KnownUsers(user)
@@ -171,6 +260,12 @@ def add_users(session, users_list):
 
 
 def add_client_contact(session, contact):
+    """
+    Добавление контакта
+    :param session: сессия
+    :param contact: контакт
+    :return:
+    """
     if not session.query(Contacts).filter_by(name=contact).count():
         contact_row = Contacts(contact)
         session.add(contact_row)
@@ -178,6 +273,12 @@ def add_client_contact(session, contact):
 
 
 def get_history(session, contact):
+    """
+    Получение истории сообщений
+    :param session:
+    :param contact: история сообщений
+    :return:
+    """
     query = session.query(MessageHistory).filter_by(contact=contact)
     return [(history_row.contact, history_row.direction,
              history_row.message, history_row.date)
@@ -185,21 +286,46 @@ def get_history(session, contact):
 
 
 def get_client_contacts(session):
+    """
+    Получение контактов
+    :param session: сессия
+    :return: список контактов
+    """
     return [contact[0] for contact in session.query(Contacts.name).all()]
 
 
 def del_contact(session, contact):
+    """
+    ДУаление кнтакта
+    :param session: сессия
+    :param contact: контакт
+    :return:
+    """
     session.query(Contacts).filter_by(name=contact).delete()
     session.commit()
 
 
 def save_message(session, contact, direction, message):
+    """
+    Сохранение сообщения
+    :param session: сессия
+    :param contact: контакт
+    :param direction:
+    :param message: сообщение
+    :return:
+    """
     message_row = MessageHistory(contact, direction, message)
     session.add(message_row)
     session.commit()
 
 
 def check_contact(session, contact):
+    """
+    Проверка существования контакта
+    :param session: сессия
+    :param contact: контакт
+    :return: лож или истина
+    """
     if session.query(Contacts).filter_by(name=contact).count():
         return True
     else:
@@ -207,16 +333,21 @@ def check_contact(session, contact):
 
 
 def get_users(session):
+    """
+    Получение списка пользователей
+    :param session: сессия
+    :return: список пользователей
+    """
     return [user[0] for user in session.query(KnownUsers.username).all()]
 
 
-def save_message(session, contact, direction, message):
-    message_row = MessageHistory(contact, direction, message)
-    session.add(message_row)
-    session.commit()
-
-
 def check_user(session, user):
+    """
+    Проверка существования пользователя
+    :param session: сессия
+    :param user: лож или истина
+    :return:
+    """
     if session.query(KnownUsers).filter_by(username=user).count():
         return True
     else:

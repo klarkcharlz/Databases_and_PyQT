@@ -1,8 +1,11 @@
+"""Декораторы"""
+
 from functools import wraps
 import inspect
 
 
 class Log:
+    """Дополнительное логгирование"""
     def __init__(self, logger):
         """
         :param logger: Параметр декоратора обьект логгера
@@ -10,6 +13,11 @@ class Log:
         self.logger = logger
 
     def __call__(self, func):
+        """
+        Где была вызвана функция, с какими параметрами и каков результат выполнения.
+        :param func:
+        :return:
+        """
         @wraps(func)
         def decorated(*args, **kwargs):
             # пока отключил что бы небыло спама

@@ -12,6 +12,7 @@ from .server import CustomServer
 
 
 class TestClientServerApplication(TestCase):
+    """Тестовое клиент-серверное приложение"""
     def setUp(self):
         # предварительная настройка
         self.test_client = CustomClient(AF_INET, SOCK_STREAM, 10)

@@ -1,3 +1,7 @@
+"""
+Модели
+"""
+
 from datetime import datetime
 
 from sqlalchemy.orm import declarative_base
@@ -13,6 +17,7 @@ Base = declarative_base()
 
 
 class User(Base):
+    """Модель пользователя"""
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
@@ -30,6 +35,7 @@ class User(Base):
 
 
 class History(Base):
+    """История"""
     __tablename__ = 'history'
 
     id = Column(Integer, primary_key=True)
@@ -47,6 +53,7 @@ class History(Base):
 
 
 class ActiveUsers(Base):
+    """Активный пользователь"""
     __tablename__ = 'active_users'
     id = Column(Integer, primary_key=True)
     user_id = Column(String, ForeignKey(User.id), unique=True)
@@ -62,6 +69,7 @@ class ActiveUsers(Base):
 
 
 class LoginHistory(Base):
+    """История подключений"""
     __tablename__ = 'login_history'
 
     id = Column(Integer, primary_key=True)
@@ -78,6 +86,7 @@ class LoginHistory(Base):
 
 
 class UsersContacts(Base):
+    """Контакты"""
     __tablename__ = 'user_contacts'
 
     id = Column(Integer, primary_key=True)
@@ -94,6 +103,7 @@ server_models = [User, History, ActiveUsers, LoginHistory, UsersContacts]
 
 # client
 class KnownUsers(Base):
+    """Известные пользователи"""
     __tablename__ = 'known_users'
 
     id = Column(Integer, primary_key=True)
@@ -104,6 +114,7 @@ class KnownUsers(Base):
 
 
 class MessageHistory(Base):
+    """История сообщений"""
     __tablename__ = 'message_history'
 
     id = Column(Integer, primary_key=True)
@@ -120,6 +131,7 @@ class MessageHistory(Base):
 
 
 class Contacts(Base):
+    """Контакты"""
     __tablename__ = 'client_contacts'
 
     id = Column(Integer, primary_key=True)
