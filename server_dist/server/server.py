@@ -13,16 +13,16 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QTimer
 from .server_gui import MainWindow, gui_create_model, HistoryWindow, create_stat_model, ConfigWindow
 
-from log_conf.server_log_config import server_log
-from decos import Log
-from database.function import get_server_session as connect_db
-from database.function import (user_logout,
-                               user_login,
-                               process_message,
-                               get_contacts,
-                               add_contact,
-                               remove_contact,
-                               users_list)
+from server_dist.log_conf.server_log_config import server_log
+from server_dist.decos import Log
+from server_dist.database.function import get_server_session as connect_db
+from server_dist.database.function import (user_logout,
+                                           user_login,
+                                           process_message,
+                                           get_contacts,
+                                           add_contact,
+                                           remove_contact,
+                                           users_list)
 
 TIMEOUT = 0.5
 

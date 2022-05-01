@@ -1,10 +1,10 @@
 """Удаление контакта"""
 
-from PyQt5.QtWidgets import QDialog, QLabel, QComboBox, QPushButton, QApplication
+from PyQt5.QtWidgets import QDialog, QLabel, QComboBox, QPushButton
 from PyQt5.QtCore import Qt
 
-from log_conf.client_log_config import client_log
-from database.function import get_client_contacts
+from server_dist.log_conf.client_log_config import client_log
+from server_dist.database.function import get_client_contacts
 
 logger = client_log
 

@@ -11,12 +11,12 @@ from Cryptodome.PublicKey import RSA
 
 from .main_window_conv import Ui_MainClientWindow
 from .errors import ServerError
-from log_conf.client_log_config import client_log
+from server_dist.log_conf import client_log
 
 from .add_contact import AddContactDialog
 from .del_contact import DelContactDialog
 
-from database.function import (
+from server_dist.database import (
     get_history,
     get_client_contacts,
     add_client_contact,

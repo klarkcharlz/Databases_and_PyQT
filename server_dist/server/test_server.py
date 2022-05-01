@@ -7,7 +7,7 @@ from time import time
 from socket import AF_INET, SOCK_STREAM
 from unittest import TestCase, main
 
-from client.client import CustomClient
+from client_dist.client.client import CustomClient
 from .server import CustomServer
 
 
