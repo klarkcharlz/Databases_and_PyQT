@@ -17,12 +17,12 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import pyqtSignal, QObject
 from Cryptodome.PublicKey import RSA
 
-sys.path.append('../')
+sys.path.append('../../')
 
-from log_conf.client_log_config import client_log
-from decos import Log
-from database.function import get_client_session as connect_db
-from database.function import add_users, add_client_contact, save_message
+from server_dist.log_conf.client_log_config import client_log
+from server_dist.decos import Log
+from server_dist.database.function import get_client_session as connect_db
+from server_dist.database.function import add_users, add_client_contact, save_message
 
 from .client_gui import ClientMainWindow
 from .start_dialog import UserNameDialog
